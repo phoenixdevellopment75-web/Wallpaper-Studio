@@ -346,7 +346,7 @@ private fun SettingsMainMenu(
 
             SettingsCategoryTile(
                 title = "Personalization",
-                subtitle = "Themes, Dynamic Monet colors, and motion physics",
+                subtitle = "Theme mode (${settings.themeMode.label}), Monet colors, and motion physics",
                 icon = Icons.Default.Palette,
                 testTag = "settings_cat_personalization",
                 onClick = {
@@ -512,6 +512,66 @@ private fun PersonalizationDetail(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             val haptics = LocalHapticFeedback.current
+
+            // Theme Mode Selector (System, Light, Dark)
+            SettingsCard(title = "App Theme Mode") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Choose light, dark, or system default appearance",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .padding(4.dp)
+                            .testTag("theme_mode_selector"),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            val isSelected = settings.themeMode == mode
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tonalElevation = if (isSelected) 3.dp else 0.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        if (settings.hapticStrength != HapticStrength.OFF) {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
+                                        onUpdateSettings(settings.copy(themeMode = mode))
+                                    }
+                                    .testTag("theme_mode_${mode.name.lowercase()}")
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = mode.label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Dynamic Theming (Monet) ON/OFF Toggle
             SettingsCard(title = "Dynamic Theming (Monet)") {
