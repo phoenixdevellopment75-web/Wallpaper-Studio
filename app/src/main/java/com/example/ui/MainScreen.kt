@@ -255,16 +255,17 @@ fun MainScreen(
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp, start = 12.dp, end = 12.dp)
             ) {
-                Box(
+                Surface(
+                    shape = RoundedCornerShape(32.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 6.dp,
+                    border = androidx.compose.foundation.BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(32.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f))
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(32.dp)
-                        )
                         .testTag("floating_action_deck")
                 ) {
                     if (uiState.params.patternType == WallpaperPatternType.STUDIO) {
@@ -768,23 +769,25 @@ fun MainScreen(
                 }
 
                 // AI Palette Studio Action (Gemini BYOK)
-                FilledTonalButton(
-                    onClick = {
-                        viewModel.showPaletteSheet(false)
-                        showAiStudioSheet = true
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("open_ai_palette_studio_button")
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Generate with AI (Gemini Studio)", fontWeight = FontWeight.Bold)
+                if (uiState.settings.isAiEnabled) {
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.showPaletteSheet(false)
+                            showAiStudioSheet = true
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("open_ai_palette_studio_button")
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Generate with AI (Gemini Studio)", fontWeight = FontWeight.Bold)
+                    }
                 }
 
                 // Dynamic Monet Extraction Action
@@ -1113,7 +1116,7 @@ fun MainScreen(
     }
 
     // AI Palette Studio Sheet (Gemini BYOK)
-    if (showAiStudioSheet) {
+    if (showAiStudioSheet && uiState.settings.isAiEnabled) {
         AIPaletteStudioSheet(
             activePalette = uiState.params.palette,
             patternName = uiState.params.patternType.displayName,
