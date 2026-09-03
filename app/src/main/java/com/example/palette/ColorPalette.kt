@@ -24,6 +24,8 @@ data class ColorPalette(
     val gradientType: GradientType = GradientType.LINEAR,
     val isDarkBackground: Boolean = true
 ) {
+    val stops: List<Color> get() = colors
+
     init {
         require(colors.isNotEmpty()) { "Color palette must have at least 1 color" }
     }

@@ -35,6 +35,18 @@ object ProceduralM3Assembler {
     private const val PHI_3 = 0.236068f
     private const val PHI_4 = 0.763932f
 
+    // Reusable Paint objects to achieve zero-allocation rendering per frame
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = AndroidColor.TRANSPARENT
+    }
+    private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val innerBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f
+        color = AndroidColor.argb(35, 255, 255, 255)
+    }
+
     /**
      * Renders user-composed shapes on the Studio canvas with 1:1 proportional scaling.
      */
@@ -93,13 +105,16 @@ object ProceduralM3Assembler {
                 isWireframe = shape.isWireframe || params.isWireframe,
                 strokeWidth = shape.strokeWidth * (baseDim / 500f),
                 scallopLobes = shape.scallopLobes,
-                castShadow = true
+                castShadow = true,
+                shadowRadius = shape.shadowRadius,
+                blurRadius = shape.blurRadius,
+                isLiquidGlass = shape.isLiquidGlass
             )
         }
     }
 
     /**
-     * Renders a single tactile M3 shape with shadow, fill, or outline.
+     * Renders a single tactile M3 shape with shadow, fill, outline, or Liquid Glass refraction.
      */
     fun drawSingleShape(
         canvas: Canvas,
@@ -114,7 +129,10 @@ object ProceduralM3Assembler {
         isWireframe: Boolean,
         strokeWidth: Float,
         scallopLobes: Int = 8,
-        castShadow: Boolean = true
+        castShadow: Boolean = true,
+        shadowRadius: Float = 16f,
+        blurRadius: Float = 0f,
+        isLiquidGlass: Boolean = false
     ) {
         val path = createShapePath(type, cx, cy, w, h, scallopLobes)
 
@@ -123,44 +141,83 @@ object ProceduralM3Assembler {
             canvas.rotate(rotationDeg, cx, cy)
         }
 
-        // Elevation Drop Shadow
-        if (castShadow && !isWireframe) {
-            val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-                this.color = AndroidColor.TRANSPARENT
-                setShadowLayer(
-                    28f,
-                    0f,
-                    14f,
-                    AndroidColor.argb((0.35f * opacity * 255).toInt(), 0, 0, 0)
-                )
-            }
+        // Elevation Drop Shadow (0dp to 32dp):
+        // Native canvas shadow layer rendered prior to drawing the fill
+        if (castShadow && !isWireframe && shadowRadius > 0.5f && opacity > 0.05f) {
+            val dy = shadowRadius * 0.5f
+            shadowPaint.color = AndroidColor.TRANSPARENT
+            shadowPaint.setShadowLayer(
+                shadowRadius.coerceIn(1f, 32f),
+                0f,
+                dy,
+                AndroidColor.argb((70 * opacity).toInt().coerceIn(0, 255), 0, 0, 0)
+            )
             canvas.drawPath(path, shadowPaint)
         }
 
-        // Primary Surface Fill / Outline
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            val alpha = (opacity * 255).toInt().coerceIn(0, 255)
-            this.color = (color and 0x00FFFFFF) or (alpha shl 24)
-            if (isWireframe) {
-                style = Paint.Style.STROKE
-                this.strokeWidth = strokeWidth.coerceAtLeast(1.5f)
-                strokeCap = Paint.Cap.ROUND
-                strokeJoin = Paint.Join.ROUND
-            } else {
+        if (isLiquidGlass) {
+            // "Liquid Glass" Frosted Shape Style:
+            // 1. Semi-translucent tinted surface fill
+            val glassAlpha = (0.45f * opacity * 255).toInt().coerceIn(0, 255)
+            val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.FILL
+                this.color = (color and 0x00FFFFFF) or (glassAlpha shl 24)
+                if (blurRadius > 0.5f) {
+                    maskFilter = android.graphics.BlurMaskFilter(
+                        blurRadius.coerceIn(0.5f, 32f),
+                        android.graphics.BlurMaskFilter.Blur.NORMAL
+                    )
+                }
             }
-        }
-        canvas.drawPath(path, paint)
+            canvas.drawPath(path, glassPaint)
 
-        // Highlight inner border for crisp tactile feel
-        if (!isWireframe && opacity > 0.3f) {
-            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            // 2. Subtle internal refraction stroke along the perimeter:
+            // 1.5dp border with linear gradient from Color.White.copy(alpha = 0.6f) to Color.Transparent
+            val refractionStrokeWidth = (strokeWidth * 0.8f).coerceIn(2.5f, 5f)
+            val refractionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
-                this.strokeWidth = 1.2f
-                this.color = AndroidColor.argb(35, 255, 255, 255)
+                this.strokeWidth = refractionStrokeWidth
+                shader = LinearGradient(
+                    cx - w / 2f, cy - h / 2f,
+                    cx + w / 2f, cy + h / 2f,
+                    intArrayOf(
+                        AndroidColor.argb((153 * opacity).toInt().coerceIn(0, 255), 255, 255, 255),
+                        AndroidColor.argb(0, 255, 255, 255)
+                    ),
+                    null,
+                    Shader.TileMode.CLAMP
+                )
             }
-            canvas.drawPath(path, borderPaint)
+            canvas.drawPath(path, refractionPaint)
+        } else {
+            // Standard Surface Fill / Outline with optional BlurMaskFilter soft edge glow
+            val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+            shapePaint.color = (color and 0x00FFFFFF) or (alpha shl 24)
+            if (isWireframe) {
+                shapePaint.style = Paint.Style.STROKE
+                shapePaint.strokeWidth = strokeWidth.coerceAtLeast(1.5f)
+                shapePaint.strokeCap = Paint.Cap.ROUND
+                shapePaint.strokeJoin = Paint.Join.ROUND
+            } else {
+                shapePaint.style = Paint.Style.FILL
+            }
+
+            // Soft Edge / Atmospheric Glow via BlurMaskFilter (Off to 24dp/32dp)
+            if (blurRadius > 0.5f) {
+                shapePaint.maskFilter = android.graphics.BlurMaskFilter(
+                    blurRadius.coerceIn(0.5f, 32f),
+                    android.graphics.BlurMaskFilter.Blur.NORMAL
+                )
+            } else {
+                shapePaint.maskFilter = null
+            }
+
+            canvas.drawPath(path, shapePaint)
+
+            // Highlight inner border for crisp tactile feel (only when not heavily blurred)
+            if (!isWireframe && opacity > 0.3f && blurRadius <= 2f) {
+                canvas.drawPath(path, innerBorderPaint)
+            }
         }
 
         canvas.restore()

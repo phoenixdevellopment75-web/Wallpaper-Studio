@@ -449,34 +449,151 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         updateParams { it.copy(customShapes = updated) }
     }
 
-    fun shuffleCustomShapes() {
-        val rng = MathUtils.FastRandom(System.nanoTime())
-        val goldenAnchors = listOf(
-            Pair(0.382f, 0.618f),
-            Pair(0.618f, 0.382f),
-            Pair(0.618f, 0.764f),
-            Pair(0.382f, 0.236f),
-            Pair(0.500f, 0.500f)
-        )
+    fun updateShapeOpacity(id: String, opacity: Float) {
         val currentShapes = _uiState.value.params.customShapes
-        val updated = currentShapes.mapIndexed { i, shape ->
-            val anchor = goldenAnchors[i % goldenAnchors.size]
-            val jitterX = (rng.nextFloat() - 0.5f) * 0.16f
-            val jitterY = (rng.nextFloat() - 0.5f) * 0.16f
-            val rot = when (i % 4) {
-                0 -> 0f
-                1 -> 45f
-                2 -> 90f
-                else -> 135f
-            }
-            shape.copy(
-                normalizedX = (anchor.first + jitterX).coerceIn(0.15f, 0.85f),
-                normalizedY = (anchor.second + jitterY).coerceIn(0.15f, 0.85f),
-                rotationDeg = rot,
-                colorIndex = (i + 1) % _uiState.value.params.palette.colors.size.coerceAtLeast(1)
-            )
+        val updated = currentShapes.map {
+            if (it.id == id) it.copy(opacity = opacity.coerceIn(0.0f, 1.0f)) else it
         }
         updateParams { it.copy(customShapes = updated) }
+    }
+
+    fun updateShapeShadowRadius(id: String, shadowRadius: Float) {
+        val currentShapes = _uiState.value.params.customShapes
+        val updated = currentShapes.map {
+            if (it.id == id) it.copy(shadowRadius = shadowRadius.coerceIn(0.0f, 32.0f)) else it
+        }
+        updateParams { it.copy(customShapes = updated) }
+    }
+
+    fun updateShapeBlurRadius(id: String, blurRadius: Float) {
+        val currentShapes = _uiState.value.params.customShapes
+        val updated = currentShapes.map {
+            if (it.id == id) it.copy(blurRadius = blurRadius.coerceIn(0.0f, 32.0f)) else it
+        }
+        updateParams { it.copy(customShapes = updated) }
+    }
+
+    fun toggleShapeLiquidGlass(id: String) {
+        val currentShapes = _uiState.value.params.customShapes
+        val updated = currentShapes.map {
+            if (it.id == id) it.copy(isLiquidGlass = !it.isLiquidGlass) else it
+        }
+        updateParams { it.copy(customShapes = updated) }
+    }
+
+    fun updateShapeLiquidGlass(id: String, isLiquidGlass: Boolean) {
+        val currentShapes = _uiState.value.params.customShapes
+        val updated = currentShapes.map {
+            if (it.id == id) it.copy(isLiquidGlass = isLiquidGlass) else it
+        }
+        updateParams { it.copy(customShapes = updated) }
+    }
+
+    /**
+     * Studio Mode: Procedural Layout Generator ("Auto-Arrange").
+     * Deterministically places 4 to 7 harmoniously balanced Material 3 shapes
+     * (Clovers, Sunny badges, Semicircles, and Squircles) across the canvas.
+     * Calculates non-colliding coordinates, pleasing scale variations (0.18f to 0.44f),
+     * and balanced palette stop assignments.
+     */
+    fun generateProceduralStudioLayout() {
+        val rng = MathUtils.FastRandom(System.nanoTime())
+        val shapePool = listOf(
+            CustomShapeType.CLOVER_4,
+            CustomShapeType.SUNNY_BADGE,
+            CustomShapeType.SEMICIRCLE,
+            CustomShapeType.SLANTED_SQUIRCLE,
+            CustomShapeType.CLOVER_8,
+            CustomShapeType.COOKIE,
+            CustomShapeType.M3_ARCH
+        )
+
+        val count = 4 + rng.nextInt(4) // 4 to 7 shapes
+        val paletteSize = _uiState.value.params.palette.colors.size.coerceAtLeast(1)
+        val generated = mutableListOf<CustomCanvasShape>()
+
+        // Aspect ratio compensation for typical mobile viewport (~1:2)
+        val aspect = 1.9f
+
+        for (i in 0 until count) {
+            val type = shapePool[rng.nextInt(shapePool.size)]
+            // Scale variations: 0.18f (~48-60dp) to 0.42f (~160-180dp)
+            val scaleNorm = 0.18f + rng.nextFloat() * 0.24f
+            val widthNorm = scaleNorm
+            val heightNorm = if (type.isProportional1to1) scaleNorm else scaleNorm * (0.8f + rng.nextFloat() * 0.4f)
+
+            // Rejection sampling for non-colliding coordinates
+            var bestX = 0.5f
+            var bestY = 0.5f
+            var maxMinDist = -1f
+
+            for (attempt in 0 until 40) {
+                val candidateX = 0.18f + rng.nextFloat() * 0.64f
+                val candidateY = 0.16f + rng.nextFloat() * 0.68f
+
+                var minDist = Float.MAX_VALUE
+                for (existing in generated) {
+                    val dx = (candidateX - existing.normalizedX)
+                    val dy = (candidateY - existing.normalizedY) * aspect
+                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                    if (dist < minDist) {
+                        minDist = dist
+                    }
+                }
+
+                // Required minimum distance based on average radii
+                val requiredDist = (widthNorm * 0.95f)
+                if (generated.isEmpty() || minDist >= requiredDist) {
+                    bestX = candidateX
+                    bestY = candidateY
+                    break
+                }
+
+                if (minDist > maxMinDist) {
+                    maxMinDist = minDist
+                    bestX = candidateX
+                    bestY = candidateY
+                }
+            }
+
+            val rot = when (rng.nextInt(6)) {
+                0 -> 0f
+                1 -> 15f
+                2 -> 30f
+                3 -> 45f
+                4 -> 90f
+                else -> 180f
+            }
+
+            // Balanced palette stops assignment (foreground accents 1, 2, 3...)
+            val colorIdx = ((i + 1) % paletteSize)
+            val shadow = 12f + rng.nextFloat() * 12f
+
+            generated.add(
+                CustomCanvasShape(
+                    id = java.util.UUID.randomUUID().toString(),
+                    type = type,
+                    normalizedX = bestX,
+                    normalizedY = bestY,
+                    normalizedWidth = widthNorm,
+                    normalizedHeight = heightNorm,
+                    rotationDeg = rot,
+                    colorIndex = colorIdx,
+                    opacity = 1.0f,
+                    shadowRadius = shadow,
+                    blurRadius = 0.0f,
+                    isLiquidGlass = (i == 0 && count > 5), // Occasional hero liquid glass
+                    zIndex = i
+                )
+            )
+        }
+
+        _uiState.update { it.copy(selectedShapeId = generated.firstOrNull()?.id) }
+        updateParams { it.copy(customShapes = generated) }
+    }
+
+    fun shuffleCustomShapes() {
+        generateProceduralStudioLayout()
     }
 
     fun resetToDefaults() {
@@ -750,13 +867,24 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
 
+            val oldBitmap = _uiState.value.previewBitmap
             _uiState.update {
                 it.copy(
                     previewBitmap = bitmap,
                     isGeneratingPreview = false
                 )
             }
+            if (oldBitmap != null && oldBitmap != bitmap && !oldBitmap.isRecycled) {
+                oldBitmap.recycle()
+            }
             lastRenderParams = currentParams
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        _uiState.value.previewBitmap?.let {
+            if (!it.isRecycled) it.recycle()
         }
     }
 }

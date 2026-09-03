@@ -53,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -75,17 +76,37 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+// Reusable static Paint objects to ensure ZERO allocations in DrawScope / Canvas passes
+private val selectionBoxPaint = android.graphics.Paint().apply {
+    style = android.graphics.Paint.Style.STROKE
+    color = android.graphics.Color.WHITE
+    pathEffect = android.graphics.DashPathEffect(floatArrayOf(16f, 12f), 0f)
+    isAntiAlias = true
+}
+private val selectionStemPaint = android.graphics.Paint().apply {
+    style = android.graphics.Paint.Style.STROKE
+    color = android.graphics.Color.WHITE
+    isAntiAlias = true
+}
+private val selectionOuterHandlePaint = android.graphics.Paint().apply {
+    style = android.graphics.Paint.Style.FILL
+    color = android.graphics.Color.WHITE
+    isAntiAlias = true
+    setShadowLayer(8f, 0f, 4f, 0x66000000)
+}
+private val selectionInnerHandlePaint = android.graphics.Paint().apply {
+    style = android.graphics.Paint.Style.FILL
+    color = 0xFF6750A4.toInt()
+    isAntiAlias = true
+}
+private val selectionRotHandlePaint = android.graphics.Paint().apply {
+    style = android.graphics.Paint.Style.FILL
+    color = 0xFF386A20.toInt()
+    isAntiAlias = true
+}
+
 /**
  * High-performance, zero-friction interactive touch canvas for Studio mode.
- *
- * Key Architectural Optimizations:
- * 1. Decouples drag translation from heavy layout recompositions:
- *    Local offset is tracked in high-speed graphics layer pass and only committed on drag end.
- * 2. Direct Corner Resize Handles (On-Shape Transform):
- *    4 distinct anchor nodes at bounding box corners. Dragging any handle scales proportionally
- *    with a strict 1:1 aspect ratio lock (clamped to minimum 48dp).
- * 3. Two-finger pinch-to-scale and rotation gestures directly on canvas.
- * 4. Tap selection with tactile elevation drop shadows.
  */
 @Composable
 fun StudioTouchCanvas(
@@ -101,6 +122,10 @@ fun StudioTouchCanvas(
     onDeleteShape: (String) -> Unit,
     onDuplicateShape: (String) -> Unit,
     onToggleShapeWireframe: (String) -> Unit,
+    onToggleShapeLiquidGlass: (String) -> Unit = { _ -> },
+    onUpdateOpacity: (String, Float) -> Unit = { _, _ -> },
+    onUpdateShadowRadius: (String, Float) -> Unit = { _, _ -> },
+    onUpdateBlurRadius: (String, Float) -> Unit = { _, _ -> },
     isFullscreen: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -355,7 +380,10 @@ fun StudioTouchCanvas(
                             isWireframe = shape.isWireframe || params.isWireframe,
                             strokeWidth = shape.strokeWidth * (size.width / 500f),
                             scallopLobes = shape.scallopLobes,
-                            castShadow = true
+                            castShadow = true,
+                            shadowRadius = shape.shadowRadius,
+                            blurRadius = shape.blurRadius,
+                            isLiquidGlass = shape.isLiquidGlass
                         )
                     }
 
@@ -372,11 +400,38 @@ fun StudioTouchCanvas(
                 }
             }
 
-            // Floating Shape Inspector Bar
+            // Viewport-clamped floating toolbar with granular controls
             if (selectedShape != null && !isFullscreen) {
-                FloatingShapeInspectorBar(
+                val canvasWidthPx = constraints.maxWidth.toFloat()
+                val canvasHeightPx = constraints.maxHeight.toFloat()
+                val baseDim = minOf(canvasWidthPx, canvasHeightPx)
+                val scaleFactor = params.scale * baseDim
+                val shapeW = if (selectedShape.type.isProportional1to1) {
+                    selectedShape.normalizedWidth * scaleFactor * localScaleMultiplier
+                } else {
+                    selectedShape.normalizedWidth * scaleFactor * localScaleMultiplier
+                }
+                val shapeH = if (selectedShape.type.isProportional1to1) {
+                    shapeW
+                } else {
+                    selectedShape.normalizedHeight * scaleFactor * localScaleMultiplier
+                }
+                val cx = (selectedShape.normalizedX * canvasWidthPx) + localDragOffset.x
+                val cy = (selectedShape.normalizedY * canvasHeightPx) + localDragOffset.y
+
+                val shapeBounds = Rect(
+                    left = cx - (shapeW / 2f),
+                    top = cy - (shapeH / 2f),
+                    right = cx + (shapeW / 2f),
+                    bottom = cy + (shapeH / 2f)
+                )
+
+                StudioShapeToolbar(
                     shape = selectedShape,
                     palette = palette,
+                    shapeBounds = shapeBounds,
+                    canvasTopOffsetDp = 0.dp,
+                    containerHeightDp = with(density) { constraints.maxHeight.toDp() },
                     onColorSelected = { colorIdx -> onSetShapeColorIndex(selectedShape.id, colorIdx) },
                     onRotate = { deg -> onCommitShapeRotation(selectedShape.id, deg) },
                     onBringToFront = { onBringShapeToFront(selectedShape.id) },
@@ -384,10 +439,11 @@ fun StudioTouchCanvas(
                     onDuplicate = { onDuplicateShape(selectedShape.id) },
                     onDelete = { onDeleteShape(selectedShape.id) },
                     onToggleWireframe = { onToggleShapeWireframe(selectedShape.id) },
-                    onDeselect = { onSelectShape(null) },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 16.dp, start = 12.dp, end = 12.dp)
+                    onToggleLiquidGlass = { onToggleShapeLiquidGlass(selectedShape.id) },
+                    onUpdateOpacity = { op -> onUpdateOpacity(selectedShape.id, op) },
+                    onUpdateShadowRadius = { sr -> onUpdateShadowRadius(selectedShape.id, sr) },
+                    onUpdateBlurRadius = { br -> onUpdateBlurRadius(selectedShape.id, br) },
+                    onDeselect = { onSelectShape(null) }
                 )
             }
         }
@@ -396,6 +452,7 @@ fun StudioTouchCanvas(
 
 /**
  * Draws the bounding box and 4 prominent corner pill/circle anchor nodes.
+ * Reuses static paints to guarantee ZERO allocations in DrawScope passes.
  */
 private fun DrawScope.drawSelectionBoundingBoxWithCorners(
     cx: Float,
@@ -414,189 +471,39 @@ private fun DrawScope.drawSelectionBoundingBoxWithCorners(
             native.rotate(rotationDeg, cx, cy)
         }
 
-        // 1. Dashed Bounding Outline
-        val boxPaint = android.graphics.Paint().apply {
-            style = android.graphics.Paint.Style.STROKE
-            strokeWidth = 2.dp.toPx()
-            color = android.graphics.Color.WHITE
-            pathEffect = android.graphics.DashPathEffect(floatArrayOf(16f, 12f), 0f)
-            isAntiAlias = true
-        }
+        // 1. Dashed Bounding Outline (reused paint)
+        selectionBoxPaint.strokeWidth = 2.dp.toPx()
         native.drawRoundRect(
             cx - halfW, cy - halfH, cx + halfW, cy + halfH,
-            16.dp.toPx(), 16.dp.toPx(), boxPaint
+            16.dp.toPx(), 16.dp.toPx(), selectionBoxPaint
         )
 
-        // Rotation stem line extending upward
+        // Rotation stem line extending upward (reused paint)
         val stemLength = 26.dp.toPx()
-        val stemPaint = android.graphics.Paint().apply {
-            style = android.graphics.Paint.Style.STROKE
-            strokeWidth = 2.dp.toPx()
-            color = android.graphics.Color.WHITE
-            isAntiAlias = true
-        }
-        native.drawLine(cx, cy - halfH, cx, cy - halfH - stemLength, stemPaint)
+        selectionStemPaint.strokeWidth = 2.dp.toPx()
+        native.drawLine(cx, cy - halfH, cx, cy - halfH - stemLength, selectionStemPaint)
 
         // 2. 4 Distinct Corner Pill/Circle Transform Anchors + Rotation Handle
-        val outerHandlePaint = android.graphics.Paint().apply {
-            style = android.graphics.Paint.Style.FILL
-            color = android.graphics.Color.WHITE
-            isAntiAlias = true
-            setShadowLayer(8f, 0f, 4f, 0x66000000)
-        }
-        val innerHandlePaint = android.graphics.Paint().apply {
-            style = android.graphics.Paint.Style.FILL
-            color = 0xFF6750A4.toInt() // Primary purple dot
-            isAntiAlias = true
-        }
-        val rotHandlePaint = android.graphics.Paint().apply {
-            style = android.graphics.Paint.Style.FILL
-            color = 0xFF386A20.toInt() // Accent Green for rotation node
-            isAntiAlias = true
-        }
+        val cornerRadiusPx = 10.dp.toPx()
+        val cornerDotRadiusPx = 4.dp.toPx()
 
-        val handleR = 9.dp.toPx()
-        val innerR = 4.dp.toPx()
-
-        val corners = listOf(
+        val corners = arrayOf(
             Pair(cx - halfW, cy - halfH),
             Pair(cx + halfW, cy - halfH),
             Pair(cx + halfW, cy + halfH),
             Pair(cx - halfW, cy + halfH)
         )
 
-        for ((hx, hy) in corners) {
-            native.drawCircle(hx, hy, handleR, outerHandlePaint)
-            native.drawCircle(hx, hy, innerR, innerHandlePaint)
+        for ((x, y) in corners) {
+            native.drawCircle(x, y, cornerRadiusPx, selectionOuterHandlePaint)
+            native.drawCircle(x, y, cornerDotRadiusPx, selectionInnerHandlePaint)
         }
 
-        // Draw dedicated rotation node
-        native.drawCircle(cx, cy - halfH - stemLength, handleR + 2.dp.toPx(), outerHandlePaint)
-        native.drawCircle(cx, cy - halfH - stemLength, innerR + 1.dp.toPx(), rotHandlePaint)
+        // Rotation Handle Node
+        val rotY = cy - halfH - stemLength
+        native.drawCircle(cx, rotY, cornerRadiusPx, selectionOuterHandlePaint)
+        native.drawCircle(cx, rotY, cornerDotRadiusPx, selectionRotHandlePaint)
 
         native.restore()
-    }
-}
-
-/**
- * Floating shape inspector bar with quick actions.
- */
-@Composable
-private fun FloatingShapeInspectorBar(
-    shape: CustomCanvasShape,
-    palette: ColorPalette,
-    onColorSelected: (Int) -> Unit,
-    onRotate: (Float) -> Unit,
-    onBringToFront: () -> Unit,
-    onSendToBack: () -> Unit,
-    onDuplicate: () -> Unit,
-    onDelete: () -> Unit,
-    onToggleWireframe: () -> Unit,
-    onDeselect: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier
-            .clip(RoundedCornerShape(24.dp))
-            .shadow(12.dp, RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.95f)
-        ),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Header Info
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${shape.type.displayName} • Drag corners to scale",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                IconButton(onClick = onDeselect, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Deselect", modifier = Modifier.size(16.dp))
-                }
-            }
-
-            // Quick Color Palette Swatches
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                palette.colors.forEachIndexed { index, color ->
-                    val isSelected = index == (shape.colorIndex % palette.colors.size)
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .border(
-                                width = if (isSelected) 3.dp else 1.dp,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.3f),
-                                shape = CircleShape
-                            )
-                            .clickable { onColorSelected(index) }
-                    )
-                }
-            }
-
-            // Quick Action Buttons Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Rotate 45 deg
-                IconButton(
-                    onClick = { onRotate((shape.rotationDeg + 45f) % 360f) },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(Icons.Default.RotateRight, contentDescription = "Rotate 45°", modifier = Modifier.size(20.dp))
-                }
-
-                // Bring to front
-                IconButton(onClick = onBringToFront, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.FlipToFront, contentDescription = "Bring Forward", modifier = Modifier.size(20.dp))
-                }
-
-                // Send to back
-                IconButton(onClick = onSendToBack, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.FlipToBack, contentDescription = "Send Back", modifier = Modifier.size(20.dp))
-                }
-
-                // Wireframe toggle
-                IconButton(onClick = onToggleWireframe, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.GridOn, contentDescription = "Wireframe Toggle", modifier = Modifier.size(20.dp))
-                }
-
-                // Duplicate
-                IconButton(onClick = onDuplicate, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", modifier = Modifier.size(20.dp))
-                }
-
-                // Delete
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
     }
 }

@@ -111,53 +111,17 @@ fun RootNavigation(
         popBack()
     }
 
-    val springSpec = spring<Float>(dampingRatio = 0.85f, stiffness = 420f)
-    val intOffsetSpec = spring<androidx.compose.ui.unit.IntOffset>(dampingRatio = 0.85f, stiffness = 420f)
+    val isDrilledDown = navStack.size > 1
+    val disableBlur = uiState.settings.disableBlurEffects
+    val animatedBlur by rememberAnimatedNavigationBlur(isDrilledDown, disableBlur)
 
     AnimatedContent(
         targetState = currentDestination,
         transitionSpec = {
             val isDrillDown = navStack.indexOf(targetState) >= navStack.indexOf(initialState)
-
-            if (isDrillDown) {
-                // PixelPlayer Drill-Down:
-                // Parent scales to 0.94f, slides slightly left, and fades out.
-                // Child slides smoothly in from the right and fades in.
-                val enter = slideInHorizontally(
-                    animationSpec = intOffsetSpec,
-                    initialOffsetX = { it }
-                ) + fadeIn(animationSpec = springSpec)
-
-                val exit = scaleOut(
-                    animationSpec = springSpec,
-                    targetScale = 0.94f
-                ) + slideOutHorizontally(
-                    animationSpec = intOffsetSpec,
-                    targetOffsetX = { -it / 6 }
-                ) + fadeOut(animationSpec = springSpec)
-
-                enter togetherWith exit
-            } else {
-                // PixelPlayer Return:
-                // Child slides away to the right with spring physics.
-                // Parent glides forward into focus from 0.94f to 1.0f.
-                val enter = scaleIn(
-                    animationSpec = springSpec,
-                    initialScale = 0.94f
-                ) + slideInHorizontally(
-                    animationSpec = intOffsetSpec,
-                    initialOffsetX = { -it / 6 }
-                ) + fadeIn(animationSpec = springSpec)
-
-                val exit = slideOutHorizontally(
-                    animationSpec = intOffsetSpec,
-                    targetOffsetX = { it }
-                ) + fadeOut(animationSpec = springSpec)
-
-                enter togetherWith exit
-            }
+            NavigationTransitions.createTransition(isDrillDown, disableBlur)
         },
-        label = "pixelplayer_navigation",
+        label = "wallpaper_studio_navigation",
         modifier = modifier.fillMaxSize()
     ) { destination ->
         when (destination) {

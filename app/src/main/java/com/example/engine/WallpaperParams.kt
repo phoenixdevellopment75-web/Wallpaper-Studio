@@ -35,6 +35,8 @@ enum class CustomShapeType(
 /**
  * An individual interactive shape in the Studio Canvas.
  */
+typealias StudioShape = CustomCanvasShape
+
 data class CustomCanvasShape(
     val id: String = UUID.randomUUID().toString(),
     val type: CustomShapeType = CustomShapeType.CLOVER_4,
@@ -45,12 +47,18 @@ data class CustomCanvasShape(
     val rotationDeg: Float = 0.0f,       // 0.0 .. 360.0
     val colorIndex: Int = 0,             // Palette color index (0 .. size-1)
     val customColorHex: Long? = null,    // Optional override color
-    val opacity: Float = 1.0f,           // 0.2 .. 1.0
+    val opacity: Float = 1.0f,           // 0.0 .. 1.0
+    val shadowRadius: Float = 16.0f,     // 0.0 .. 32.0 dp (drop shadow blur radius)
+    val blurRadius: Float = 0.0f,        // 0.0 .. 32.0 dp (soft edge / atmospheric glow)
+    val isLiquidGlass: Boolean = false,  // Frosted liquid glass translucent fill with perimeter refraction
     val zIndex: Int = 0,                 // Layer ordering
     val scallopLobes: Int = 8,           // 6, 8, 10, or 12 lobes
     val isWireframe: Boolean = false,
     val strokeWidth: Float = 2.5f
-)
+) {
+    val shadowElevation: Float get() = shadowRadius
+    val glowRadius: Float get() = blurRadius
+}
 
 /**
  * Curated Procedural Pattern Families with clean, direct naming.

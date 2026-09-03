@@ -84,8 +84,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -138,6 +140,7 @@ fun MainScreen(
 
     // Button spring bounce physics
     val generateButtonScale = remember { Animatable(1f) }
+    var showAiStudioSheet by remember { mutableStateOf(false) }
 
     val isAnySheetOpen = uiState.showStyleSheet ||
         uiState.showPaletteSheet ||
@@ -145,7 +148,8 @@ fun MainScreen(
         uiState.showExportDialog ||
         uiState.isSettingsOpen ||
         uiState.showColorPickerModal ||
-        uiState.showCustomPaletteBuilder
+        uiState.showCustomPaletteBuilder ||
+        showAiStudioSheet
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -165,7 +169,7 @@ fun MainScreen(
         ) {
             // 1. Interactive Studio Canvas OR Procedural Bitmap Canvas
             if (uiState.params.patternType == WallpaperPatternType.STUDIO) {
-                StudioTouchCanvas(
+                StudioCanvas(
                     params = uiState.params,
                     selectedShapeId = uiState.selectedShapeId,
                     onSelectShape = { id -> viewModel.selectShape(id) },
@@ -175,9 +179,13 @@ fun MainScreen(
                     onSetShapeColorIndex = { id, idx -> viewModel.setShapeColorIndex(id, idx) },
                     onBringShapeToFront = { id -> viewModel.bringShapeToFront(id) },
                     onSendShapeToBack = { id -> viewModel.sendShapeToBack(id) },
-                    onDeleteShape = { id -> viewModel.deleteShape(id) },
                     onDuplicateShape = { id -> viewModel.duplicateShape(id) },
+                    onDeleteShape = { id -> viewModel.deleteShape(id) },
                     onToggleShapeWireframe = { id -> viewModel.toggleShapeWireframe(id) },
+                    onToggleShapeLiquidGlass = { id -> viewModel.toggleShapeLiquidGlass(id) },
+                    onUpdateOpacity = { id, op -> viewModel.updateShapeOpacity(id, op) },
+                    onUpdateShadowRadius = { id, sr -> viewModel.updateShapeShadowRadius(id, sr) },
+                    onUpdateBlurRadius = { id, br -> viewModel.updateShapeBlurRadius(id, br) },
                     isFullscreen = uiState.isFullscreenPreview,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -260,185 +268,34 @@ fun MainScreen(
                         .testTag("floating_action_deck")
                 ) {
                     if (uiState.params.patternType == WallpaperPatternType.STUDIO) {
-                        // 4 equal-spaced pills in Studio mode: Style, Shape, Shuffle, Palette
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            // Pill 1: Style
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                border = null,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        if (uiState.settings.hapticStrength != HapticStrength.OFF) {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        }
-                                        viewModel.showStyleSheet(true)
-                                    }
-                                    .testTag("style_chip_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = getPatternIcon(uiState.params.patternType),
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Style",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                        StudioDock(
+                            palette = uiState.params.palette,
+                            styleIcon = getPatternIcon(uiState.params.patternType),
+                            onOpenStyleSheet = {
+                                if (uiState.settings.hapticStrength != HapticStrength.OFF) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
-                            }
-
-                            // Pill 2: Shape
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                border = null,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        if (uiState.settings.hapticStrength != HapticStrength.OFF) {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        }
-                                        viewModel.showAddShapeSheet(true)
-                                    }
-                                    .testTag("add_shape_deck_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Add Shape",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Shape",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                viewModel.showStyleSheet(true)
+                            },
+                            onOpenAddShapeSheet = {
+                                if (uiState.settings.hapticStrength != HapticStrength.OFF) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
-                            }
-
-                            // Pill 3: Shuffle (Primary)
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .scale(generateButtonScale.value)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        scope.launch {
-                                            if (uiState.settings.hapticStrength != HapticStrength.OFF) {
-                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            }
-                                            generateButtonScale.animateTo(
-                                                targetValue = 0.88f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessHigh
-                                                )
-                                            )
-                                            viewModel.onGenerateOrShuffleClicked()
-                                            generateButtonScale.animateTo(
-                                                targetValue = 1f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioLowBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
-                                            )
-                                        }
-                                    }
-                                    .testTag("generate_re-roll_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Shuffle,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Shuffle",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
+                                viewModel.showAddShapeSheet(true)
+                            },
+                            onGenerateLayout = {
+                                if (uiState.settings.hapticStrength != HapticStrength.OFF) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 }
-                            }
-
-                            // Pill 4: Palette
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                border = null,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        if (uiState.settings.hapticStrength != HapticStrength.OFF) {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        }
-                                        viewModel.showPaletteSheet(true)
-                                    }
-                                    .testTag("palette_chip_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        uiState.params.palette.colors.take(3).forEach { color ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(7.dp)
-                                                    .clip(CircleShape)
-                                                    .background(color)
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Colors",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                viewModel.generateProceduralStudioLayout()
+                            },
+                            onOpenPaletteSheet = {
+                                if (uiState.settings.hapticStrength != HapticStrength.OFF) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
+                                viewModel.showPaletteSheet(true)
                             }
-                        }
+                        )
                     } else {
                         // Standard mode dock: Style, Generate, Palette, Settings
                         Row(
@@ -910,6 +767,26 @@ fun MainScreen(
                     Text("Create Custom Palette", fontWeight = FontWeight.Bold)
                 }
 
+                // AI Palette Studio Action (Gemini BYOK)
+                FilledTonalButton(
+                    onClick = {
+                        viewModel.showPaletteSheet(false)
+                        showAiStudioSheet = true
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("open_ai_palette_studio_button")
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Generate with AI (Gemini Studio)", fontWeight = FontWeight.Bold)
+                }
+
                 // Dynamic Monet Extraction Action
                 FilledTonalButton(
                     onClick = {
@@ -1232,6 +1109,22 @@ fun MainScreen(
                 viewModel.showCustomPaletteBuilder(false)
             },
             onDismiss = { viewModel.showCustomPaletteBuilder(false) }
+        )
+    }
+
+    // AI Palette Studio Sheet (Gemini BYOK)
+    if (showAiStudioSheet) {
+        AIPaletteStudioSheet(
+            activePalette = uiState.params.palette,
+            patternName = uiState.params.patternType.displayName,
+            onApplyPalette = { pal ->
+                viewModel.setPalette(pal)
+            },
+            onEditStops = { pal ->
+                viewModel.setPalette(pal)
+                viewModel.showCustomPaletteBuilder(true)
+            },
+            onDismiss = { showAiStudioSheet = false }
         )
     }
 
