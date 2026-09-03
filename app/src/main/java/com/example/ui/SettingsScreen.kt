@@ -148,6 +148,7 @@ data class AppSettingsState(
     val subSamplingEnabled: Boolean = false,
     val hapticStrength: HapticStrength = HapticStrength.FIRM,
     val hapticsEnabled: Boolean = true,
+    val displayBlurEffectsEnabled: Boolean = false,
     val isAiEnabled: Boolean = false
 )
 
@@ -765,6 +766,40 @@ private fun PersonalizationDetail(
                             }
                         }
                     }
+                }
+            }
+
+            // Display & Scrim Blur Effects (Safe backdrop blur on Android 12+)
+            SettingsCard(title = "Display & Scrim Blur Effects") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(
+                            text = "Backdrop & Scrim Blur",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Applies hardware blur strictly to wallpaper backdrop under sheets and dialogs on Android 12+. Never blurs text or cards.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = settings.displayBlurEffectsEnabled,
+                        onCheckedChange = { isEnabled ->
+                            if (settings.hapticStrength != HapticStrength.OFF) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            onUpdateSettings(settings.copy(displayBlurEffectsEnabled = isEnabled))
+                        },
+                        modifier = Modifier.testTag("toggle_scrim_blur")
+                    )
                 }
             }
 

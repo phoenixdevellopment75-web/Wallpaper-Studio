@@ -41,6 +41,7 @@ class SettingsDataStoreRepository(private val context: Context) {
         val ANTI_ALIASING = booleanPreferencesKey("anti_aliasing")
         val SUB_SAMPLING = booleanPreferencesKey("sub_sampling")
         val IS_AI_ENABLED = booleanPreferencesKey("is_ai_enabled")
+        val DISPLAY_BLUR_EFFECTS = booleanPreferencesKey("display_blur_effects")
         val LAST_SELECTED_STYLE = stringPreferencesKey("last_selected_style")
         val USER_CUSTOM_PALETTES = stringPreferencesKey("user_custom_palettes_json")
     }
@@ -78,6 +79,7 @@ class SettingsDataStoreRepository(private val context: Context) {
             val antiAliasing = preferences[PreferencesKeys.ANTI_ALIASING] ?: true
             val subSampling = preferences[PreferencesKeys.SUB_SAMPLING] ?: false
             val isAiEnabled = preferences[PreferencesKeys.IS_AI_ENABLED] ?: false
+            val displayBlurEffects = preferences[PreferencesKeys.DISPLAY_BLUR_EFFECTS] ?: false
 
             AppSettingsState(
                 dynamicMonetEnabled = dynamicMonet,
@@ -90,6 +92,7 @@ class SettingsDataStoreRepository(private val context: Context) {
                 subSamplingEnabled = subSampling,
                 hapticStrength = hapticStrength,
                 hapticsEnabled = hapticsEnabled,
+                displayBlurEffectsEnabled = displayBlurEffects,
                 isAiEnabled = isAiEnabled
             )
         }
@@ -131,6 +134,7 @@ class SettingsDataStoreRepository(private val context: Context) {
             preferences[PreferencesKeys.EXPORT_FORMAT] = settings.exportFormat.name
             preferences[PreferencesKeys.ANTI_ALIASING] = settings.antiAliasingEnabled
             preferences[PreferencesKeys.SUB_SAMPLING] = settings.subSamplingEnabled
+            preferences[PreferencesKeys.DISPLAY_BLUR_EFFECTS] = settings.displayBlurEffectsEnabled
             preferences[PreferencesKeys.IS_AI_ENABLED] = settings.isAiEnabled
         }
     }

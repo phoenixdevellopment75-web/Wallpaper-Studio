@@ -6,8 +6,10 @@ import android.graphics.Color as AndroidColor
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.Typeface
 import androidx.compose.ui.graphics.toArgb
 import com.example.math.MathUtils
 import kotlin.math.PI
@@ -69,48 +71,158 @@ object ProceduralM3Assembler {
         canvas.drawRect(0f, 0f, width, height, bgPaint)
 
         val colors = palette.colors.map { it.toArgb() }
-        val sortedShapes = params.customShapes.sortedBy { it.zIndex }
-
-        // Uniform 1:1 base reference dimension so shapes never stretch on tall screens
+        // Base reference dimension for 1:1 scaling
         val baseDim = minOf(width, height)
 
-        for (shape in sortedShapes) {
-            val cx = shape.normalizedX * width
-            val cy = shape.normalizedY * height
-
-            val scaleFactor = params.scale * baseDim
-            val w = shape.normalizedWidth * scaleFactor
-            val h = if (shape.type.isProportional1to1) {
-                shape.normalizedWidth * scaleFactor // Force strict 1:1 aspect ratio!
-            } else {
-                shape.normalizedHeight * scaleFactor
-            }
-
-            val color = if (shape.customColorHex != null) {
-                shape.customColorHex.toInt()
-            } else {
-                colors[shape.colorIndex % colors.size]
-            }
-
-            drawSingleShape(
-                canvas = canvas,
-                type = shape.type,
-                cx = cx,
-                cy = cy,
-                w = w,
-                h = h,
-                rotationDeg = shape.rotationDeg + params.rotationDegrees,
-                color = color,
-                opacity = shape.opacity,
-                isWireframe = shape.isWireframe || params.isWireframe,
-                strokeWidth = shape.strokeWidth * (baseDim / 500f),
-                scallopLobes = shape.scallopLobes,
-                castShadow = true,
-                shadowRadius = shape.shadowRadius,
-                blurRadius = shape.blurRadius,
-                isLiquidGlass = shape.isLiquidGlass
-            )
+        // Unified rendering queue sorted by zIndex
+        sealed class RenderItem(val z: Int) {
+            class ShapeItem(val shape: CustomCanvasShape) : RenderItem(shape.zIndex)
+            class TextItem(val text: StudioTextLayer) : RenderItem(text.zIndex)
         }
+
+        val renderQueue = (params.customShapes.map { RenderItem.ShapeItem(it) } +
+                params.customTexts.map { RenderItem.TextItem(it) }).sortedBy { it.z }
+
+        for (item in renderQueue) {
+            when (item) {
+                is RenderItem.ShapeItem -> {
+                    val shape = item.shape
+                    val cx = shape.normalizedX * width
+                    val cy = shape.normalizedY * height
+
+                    val scaleFactor = params.scale * baseDim
+                    val w = shape.normalizedWidth * scaleFactor
+                    val h = if (shape.type.isProportional1to1) {
+                        shape.normalizedWidth * scaleFactor // Force strict 1:1 aspect ratio!
+                    } else {
+                        shape.normalizedHeight * scaleFactor
+                    }
+
+                    val color = if (shape.customColorHex != null) {
+                        shape.customColorHex.toInt()
+                    } else {
+                        colors[shape.colorIndex % colors.size]
+                    }
+
+                    drawSingleShape(
+                        canvas = canvas,
+                        type = shape.type,
+                        cx = cx,
+                        cy = cy,
+                        w = w,
+                        h = h,
+                        rotationDeg = shape.rotationDeg + params.rotationDegrees,
+                        color = color,
+                        opacity = shape.opacity,
+                        isWireframe = shape.isWireframe || params.isWireframe,
+                        strokeWidth = shape.strokeWidth * (baseDim / 500f),
+                        scallopLobes = shape.scallopLobes,
+                        castShadow = true,
+                        shadowRadius = shape.shadowRadius,
+                        blurRadius = shape.blurRadius,
+                        isLiquidGlass = shape.isLiquidGlass
+                    )
+                }
+                is RenderItem.TextItem -> {
+                    val textLayer = item.text
+                    val cx = textLayer.normalizedX * width
+                    val cy = textLayer.normalizedY * height
+                    val fontSizePx = textLayer.normalizedSize * baseDim * params.scale
+                    val color = if (textLayer.customColorHex != null) {
+                        textLayer.customColorHex.toInt()
+                    } else {
+                        colors[textLayer.colorIndex % colors.size]
+                    }
+
+                    drawSingleText(
+                        canvas = canvas,
+                        textLayer = textLayer,
+                        cx = cx,
+                        cy = cy,
+                        fontSizePx = fontSizePx,
+                        color = color,
+                        rotationDeg = textLayer.rotationDeg + params.rotationDegrees
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Nagasaki-style architectural display typography renderer.
+     * Ultra-bold, condensed, zero/negative letter spacing, exaggerated vertical presence,
+     * with tactile elevation drop shadow.
+     */
+    fun drawSingleText(
+        canvas: Canvas,
+        textLayer: StudioTextLayer,
+        cx: Float,
+        cy: Float,
+        fontSizePx: Float,
+        color: Int,
+        rotationDeg: Float
+    ) {
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.create(
+                if (textLayer.isCondensed) "sans-serif-condensed" else Typeface.DEFAULT.toString(),
+                Typeface.BOLD
+            )
+            textSize = fontSizePx
+            letterSpacing = textLayer.letterSpacing
+            textAlign = Paint.Align.CENTER
+            this.color = color
+            alpha = (textLayer.opacity.coerceIn(0f, 1f) * 255).toInt()
+            isFakeBoldText = true
+
+            if (textLayer.shadowRadius > 0f) {
+                val shadowColor = AndroidColor.argb(
+                    (110 * textLayer.opacity).toInt(),
+                    0,
+                    0,
+                    0
+                )
+                setShadowLayer(
+                    textLayer.shadowRadius,
+                    0f,
+                    textLayer.shadowRadius * 0.4f,
+                    shadowColor
+                )
+            }
+        }
+
+        val bounds = Rect()
+        textPaint.getTextBounds(textLayer.text, 0, textLayer.text.length, bounds)
+        val textCenterYOffset = (bounds.bottom + bounds.top) / 2f
+
+        canvas.save()
+        if (rotationDeg != 0f) {
+            canvas.rotate(rotationDeg, cx, cy)
+        }
+
+        canvas.drawText(textLayer.text, cx, cy - textCenterYOffset, textPaint)
+        canvas.restore()
+    }
+
+    fun measureTextBounds(
+        textLayer: StudioTextLayer,
+        baseDim: Float,
+        scale: Float
+    ): RectF {
+        val fontSizePx = textLayer.normalizedSize * baseDim * scale
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.create(
+                if (textLayer.isCondensed) "sans-serif-condensed" else Typeface.DEFAULT.toString(),
+                Typeface.BOLD
+            )
+            textSize = fontSizePx
+            letterSpacing = textLayer.letterSpacing
+            isFakeBoldText = true
+        }
+        val bounds = Rect()
+        textPaint.getTextBounds(textLayer.text, 0, textLayer.text.length, bounds)
+        val width = textPaint.measureText(textLayer.text)
+        val height = bounds.height().toFloat().coerceAtLeast(fontSizePx * 0.7f)
+        return RectF(-width / 2f, -height / 2f, width / 2f, height / 2f)
     }
 
     /**

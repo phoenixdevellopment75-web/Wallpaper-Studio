@@ -157,7 +157,8 @@ data class WallpaperParams(
     val pillCurvature: Float = 1.0f,    // Stacked pills corner roundness (0.1f .. 1.0f)
     val palette: ColorPalette = PaletteEngine.PRESET_ALPINE_MIST,
     val aspectRatio: AspectRatioPreset = AspectRatioPreset.PHONE_TALL,
-    val customShapes: List<CustomCanvasShape> = defaultInitialShapes()
+    val customShapes: List<CustomCanvasShape> = defaultInitialShapes(),
+    val customTexts: List<StudioTextLayer> = emptyList()
 ) {
     val subTypeName: String
         get() = patternType.subTypes.getOrElse(subTypeIndex) { patternType.subTypes.first() }

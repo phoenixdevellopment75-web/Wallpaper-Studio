@@ -1,47 +1,18 @@
 package com.example.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.FlipToBack
-import androidx.compose.material.icons.filled.FlipToFront
-import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.RotateRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,30 +24,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.engine.CustomCanvasShape
 import com.example.engine.ProceduralM3Assembler
+import com.example.engine.StudioTextLayer
 import com.example.engine.WallpaperParams
-import com.example.palette.ColorPalette
 import kotlin.math.PI
-import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-// Reusable static Paint objects to ensure ZERO allocations in DrawScope / Canvas passes
+// Reusable zero-allocation paints for selection frame and handles
 private val selectionBoxPaint = android.graphics.Paint().apply {
     style = android.graphics.Paint.Style.STROKE
     color = android.graphics.Color.WHITE
@@ -107,12 +74,15 @@ private val selectionRotHandlePaint = android.graphics.Paint().apply {
 
 /**
  * High-performance, zero-friction interactive touch canvas for Studio mode.
+ * Supports both M3 vector shapes and Nagasaki Depth Text layers in unified zIndex hierarchy.
  */
 @Composable
 fun StudioTouchCanvas(
     params: WallpaperParams,
     selectedShapeId: String?,
+    selectedTextId: String? = null,
     onSelectShape: (String?) -> Unit,
+    onSelectTextLayer: (String?) -> Unit = {},
     onCommitShapePosition: (String, Float, Float) -> Unit,
     onCommitShapeScale: (String, Float) -> Unit,
     onCommitShapeRotation: (String, Float) -> Unit,
@@ -126,6 +96,17 @@ fun StudioTouchCanvas(
     onUpdateOpacity: (String, Float) -> Unit = { _, _ -> },
     onUpdateShadowRadius: (String, Float) -> Unit = { _, _ -> },
     onUpdateBlurRadius: (String, Float) -> Unit = { _, _ -> },
+    // Text Layer Callbacks
+    onUpdateTextContent: (String, String) -> Unit = { _, _ -> },
+    onCommitTextPosition: (String, Float, Float) -> Unit = { _, _, _ -> },
+    onCommitTextScale: (String, Float) -> Unit = { _, _ -> },
+    onCommitTextRotation: (String, Float) -> Unit = { _, _ -> },
+    onSetTextColorIndex: (String, Int) -> Unit = { _, _ -> },
+    onBringTextToFront: (String) -> Unit = {},
+    onSendTextToBack: (String) -> Unit = {},
+    onDeleteText: (String) -> Unit = {},
+    onUpdateTextOpacity: (String, Float) -> Unit = { _, _ -> },
+    onUpdateTextShadowRadius: (String, Float) -> Unit = { _, _ -> },
     isFullscreen: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -141,12 +122,13 @@ fun StudioTouchCanvas(
     }
 
     val selectedShape = params.customShapes.find { it.id == selectedShapeId }
+    val selectedText = params.customTexts.find { it.id == selectedTextId }
 
     // Fast local drag offsets to avoid recomposition friction
-    var localDragOffset by remember(selectedShapeId) { mutableStateOf(Offset.Zero) }
+    var localDragOffset by remember(selectedShapeId, selectedTextId) { mutableStateOf(Offset.Zero) }
     var activeCornerHandleIndex by remember { mutableIntStateOf(-1) }
-    var localScaleMultiplier by remember(selectedShapeId) { mutableFloatStateOf(1f) }
-    var localRotationDeg by remember(selectedShapeId) { mutableStateOf<Float?>(null) }
+    var localScaleMultiplier by remember(selectedShapeId, selectedTextId) { mutableFloatStateOf(1f) }
+    var localRotationDeg by remember(selectedShapeId, selectedTextId) { mutableStateOf<Float?>(null) }
 
     Box(
         modifier = modifier
@@ -171,7 +153,7 @@ fun StudioTouchCanvas(
                 )
                 .background(Brush.verticalGradient(bgColors))
                 // Two-finger multi-touch transform (Pinch-to-scale & rotate directly on canvas)
-                .pointerInput(selectedShapeId, params.scale) {
+                .pointerInput(selectedShapeId, selectedTextId, params.scale) {
                     detectTransformGestures { _, _, zoom, rotation ->
                         if (selectedShapeId != null) {
                             val curr = params.customShapes.find { it.id == selectedShapeId }
@@ -185,11 +167,23 @@ fun StudioTouchCanvas(
                                     onCommitShapeRotation(selectedShapeId, newRot)
                                 }
                             }
+                        } else if (selectedTextId != null) {
+                            val currText = params.customTexts.find { it.id == selectedTextId }
+                            if (currText != null) {
+                                if (zoom != 1f) {
+                                    val newSize = (currText.normalizedSize * zoom).coerceIn(0.06f, 0.45f)
+                                    onCommitTextScale(selectedTextId, newSize)
+                                }
+                                if (rotation != 0f) {
+                                    val newRot = (currText.rotationDeg + rotation) % 360f
+                                    onCommitTextRotation(selectedTextId, newRot)
+                                }
+                            }
                         }
                     }
                 }
-                // Tap hit testing & selection
-                .pointerInput(params.customShapes) {
+                // Tap hit testing & selection for both shapes and text layers
+                .pointerInput(params.customShapes, params.customTexts) {
                     detectTapGestures(
                         onTap = { tapOffset ->
                             val canvasW = size.width.toFloat()
@@ -198,29 +192,50 @@ fun StudioTouchCanvas(
                             val normTapX = tapOffset.x / canvasW
                             val normTapY = tapOffset.y / canvasH
 
-                            val hitShape = params.customShapes
-                                .sortedByDescending { it.zIndex }
-                                .firstOrNull { shape ->
-                                    val scaleFactor = params.scale * baseDim
-                                    val shapeW = shape.normalizedWidth * scaleFactor
-                                    val shapeH = if (shape.type.isProportional1to1) {
-                                        shape.normalizedWidth * scaleFactor
-                                    } else {
-                                        shape.normalizedHeight * scaleFactor
-                                    }
-                                    val halfNormW = (shapeW / canvasW) / 1.7f
-                                    val halfNormH = (shapeH / canvasH) / 1.7f
-                                    val dx = kotlin.math.abs(normTapX - shape.normalizedX)
-                                    val dy = kotlin.math.abs(normTapY - shape.normalizedY)
-                                    dx <= halfNormW && dy <= halfNormH
-                                }
+                            // Check text layers first (if higher zIndex)
+                            sealed class TargetHit(val z: Int, val isShape: Boolean, val id: String)
+                            val candidates = mutableListOf<TargetHit>()
 
-                            onSelectShape(hitShape?.id)
+                            for (s in params.customShapes) {
+                                val scaleFactor = params.scale * baseDim
+                                val shapeW = s.normalizedWidth * scaleFactor
+                                val shapeH = if (s.type.isProportional1to1) shapeW else s.normalizedHeight * scaleFactor
+                                val halfNormW = (shapeW / canvasW) / 1.7f
+                                val halfNormH = (shapeH / canvasH) / 1.7f
+                                val dx = kotlin.math.abs(normTapX - s.normalizedX)
+                                val dy = kotlin.math.abs(normTapY - s.normalizedY)
+                                if (dx <= halfNormW && dy <= halfNormH) {
+                                    candidates.add(TargetHit(s.zIndex, true, s.id))
+                                }
+                            }
+
+                            for (t in params.customTexts) {
+                                val bounds = ProceduralM3Assembler.measureTextBounds(t, baseDim, params.scale)
+                                val halfNormW = ((bounds.width() + 32f) / canvasW) / 2f
+                                val halfNormH = ((bounds.height() + 32f) / canvasH) / 2f
+                                val dx = kotlin.math.abs(normTapX - t.normalizedX)
+                                val dy = kotlin.math.abs(normTapY - t.normalizedY)
+                                if (dx <= halfNormW && dy <= halfNormH) {
+                                    candidates.add(TargetHit(t.zIndex, false, t.id))
+                                }
+                            }
+
+                            val topHit = candidates.maxByOrNull { it.z }
+                            if (topHit == null) {
+                                onSelectShape(null)
+                                onSelectTextLayer(null)
+                            } else if (topHit.isShape) {
+                                onSelectShape(topHit.id)
+                                onSelectTextLayer(null)
+                            } else {
+                                onSelectTextLayer(topHit.id)
+                                onSelectShape(null)
+                            }
                         }
                     )
                 }
                 // Zero-friction drag & direct corner resize handles
-                .pointerInput(selectedShapeId, params.customShapes, params.scale) {
+                .pointerInput(selectedShapeId, selectedTextId, params.customShapes, params.customTexts, params.scale) {
                     detectDragGestures(
                         onDragStart = { startOffset ->
                             localDragOffset = Offset.Zero
@@ -228,11 +243,12 @@ fun StudioTouchCanvas(
                             localScaleMultiplier = 1f
                             localRotationDeg = null
 
+                            val canvasW = size.width.toFloat()
+                            val canvasH = size.height.toFloat()
+                            val baseDim = minOf(canvasW, canvasH)
+                            val scaleFactor = params.scale * baseDim
+
                             if (selectedShape != null) {
-                                val canvasW = size.width.toFloat()
-                                val canvasH = size.height.toFloat()
-                                val baseDim = minOf(canvasW, canvasH)
-                                val scaleFactor = params.scale * baseDim
                                 val cx = selectedShape.normalizedX * canvasW
                                 val cy = selectedShape.normalizedY * canvasH
                                 val w = selectedShape.normalizedWidth * scaleFactor
@@ -242,12 +258,11 @@ fun StudioTouchCanvas(
                                 val stemLength = 26.dp.toPx()
                                 val rotRad = ((selectedShape.rotationDeg + params.rotationDegrees) * (PI / 180f)).toFloat()
 
-                                // Calculate 4 corner handle coordinates + 1 rotation stem handle
                                 val cornerOffsets = listOf(
-                                    Offset(-halfW, -halfH), // 0: Top-Left
-                                    Offset(halfW, -halfH),  // 1: Top-Right
-                                    Offset(halfW, halfH),   // 2: Bottom-Right
-                                    Offset(-halfW, halfH)   // 3: Bottom-Left
+                                    Offset(-halfW, -halfH),
+                                    Offset(halfW, -halfH),
+                                    Offset(halfW, halfH),
+                                    Offset(-halfW, halfH)
                                 )
 
                                 cornerOffsets.forEachIndexed { index, corner ->
@@ -259,12 +274,42 @@ fun StudioTouchCanvas(
                                     }
                                 }
 
-                                // Check rotation stem handle (above top center)
-                                val rotStemX = cx - (-halfH - stemLength) * sin(rotRad)
-                                val rotStemY = cy + (-halfH - stemLength) * cos(rotRad)
-                                val distStem = sqrt((startOffset.x - rotStemX) * (startOffset.x - rotStemX) + (startOffset.y - rotStemY) * (startOffset.y - rotStemY))
-                                if (distStem <= handleTouchRadiusPx) {
-                                    activeCornerHandleIndex = 4 // Rotation mode
+                                val stemRotX = cx + 0f * cos(rotRad) - (-halfH - stemLength) * sin(rotRad)
+                                val stemRotY = cy + 0f * sin(rotRad) + (-halfH - stemLength) * cos(rotRad)
+                                val stemDist = sqrt((startOffset.x - stemRotX) * (startOffset.x - stemRotX) + (startOffset.y - stemRotY) * (startOffset.y - stemRotY))
+                                if (stemDist <= handleTouchRadiusPx) {
+                                    activeCornerHandleIndex = 4
+                                }
+                            } else if (selectedText != null) {
+                                val cx = selectedText.normalizedX * canvasW
+                                val cy = selectedText.normalizedY * canvasH
+                                val bounds = ProceduralM3Assembler.measureTextBounds(selectedText, baseDim, params.scale)
+                                val halfW = (bounds.width() / 2f) + 16.dp.toPx()
+                                val halfH = (bounds.height() / 2f) + 16.dp.toPx()
+                                val stemLength = 26.dp.toPx()
+                                val rotRad = ((selectedText.rotationDeg + params.rotationDegrees) * (PI / 180f)).toFloat()
+
+                                val cornerOffsets = listOf(
+                                    Offset(-halfW, -halfH),
+                                    Offset(halfW, -halfH),
+                                    Offset(halfW, halfH),
+                                    Offset(-halfW, halfH)
+                                )
+
+                                cornerOffsets.forEachIndexed { index, corner ->
+                                    val rotatedX = cx + corner.x * cos(rotRad) - corner.y * sin(rotRad)
+                                    val rotatedY = cy + corner.x * sin(rotRad) + corner.y * cos(rotRad)
+                                    val dist = sqrt((startOffset.x - rotatedX) * (startOffset.x - rotatedX) + (startOffset.y - rotatedY) * (startOffset.y - rotatedY))
+                                    if (dist <= handleTouchRadiusPx) {
+                                        activeCornerHandleIndex = index
+                                    }
+                                }
+
+                                val stemRotX = cx + 0f * cos(rotRad) - (-halfH - stemLength) * sin(rotRad)
+                                val stemRotY = cy + 0f * sin(rotRad) + (-halfH - stemLength) * cos(rotRad)
+                                val stemDist = sqrt((startOffset.x - stemRotX) * (startOffset.x - stemRotX) + (startOffset.y - stemRotY) * (startOffset.y - stemRotY))
+                                if (stemDist <= handleTouchRadiusPx) {
+                                    activeCornerHandleIndex = 4
                                 }
                             }
                         },
@@ -275,36 +320,60 @@ fun StudioTouchCanvas(
                             val baseDim = minOf(canvasW, canvasH)
                             val scaleFactor = params.scale * baseDim
 
-                            if (activeCornerHandleIndex == 4 && selectedShape != null) {
-                                // Rotation Handle Mode: calculate smooth 360-deg angle around center
+                            if (selectedShape != null) {
                                 val cx = selectedShape.normalizedX * canvasW
                                 val cy = selectedShape.normalizedY * canvasH
-                                val dx = change.position.x - cx
-                                val dy = change.position.y - cy
-                                val angleRad = atan2(dy, dx)
-                                var angleDeg = (angleRad * (180f / PI.toFloat())) + 90f - params.rotationDegrees
-                                while (angleDeg < 0f) angleDeg += 360f
-                                localRotationDeg = angleDeg % 360f
-                            } else if (activeCornerHandleIndex in 0..3 && selectedShape != null) {
-                                // Direct Corner Resize Mode: scale shape proportionally with locked 1:1 aspect ratio
-                                val cx = selectedShape.normalizedX * canvasW
-                                val cy = selectedShape.normalizedY * canvasH
-                                val currentDist = sqrt((change.position.x - cx) * (change.position.x - cx) + (change.position.y - cy) * (change.position.y - cy))
-                                val initialHalfDiag = (selectedShape.normalizedWidth * scaleFactor) / 1.414f
-                                val scaleMultiplier = if (initialHalfDiag > 0f) currentDist / initialHalfDiag else 1f
-                                localScaleMultiplier = scaleMultiplier.coerceIn(0.2f, 3.5f)
-                            } else if (selectedShape != null) {
-                                // Zero-Friction Translation Mode: decoupled local offset for 120fps motion
-                                localDragOffset += dragAmount
+
+                                if (activeCornerHandleIndex == 4) {
+                                    val currentTouch = change.position
+                                    val angleRad = kotlin.math.atan2(currentTouch.y - cy, currentTouch.x - cx)
+                                    var deg = Math.toDegrees(angleRad.toDouble()).toFloat() + 90f
+                                    if (deg < 0) deg += 360f
+                                    localRotationDeg = deg % 360f
+                                } else if (activeCornerHandleIndex in 0..3) {
+                                    val currentDist = sqrt((change.position.x - cx) * (change.position.x - cx) + (change.position.y - cy) * (change.position.y - cy))
+                                    val w = selectedShape.normalizedWidth * scaleFactor
+                                    val h = if (selectedShape.type.isProportional1to1) w else selectedShape.normalizedHeight * scaleFactor
+                                    val initialDist = sqrt((w / 2f) * (w / 2f) + (h / 2f) * (h / 2f)).coerceAtLeast(1f)
+                                    val ratio = (currentDist / initialDist).coerceIn(0.25f, 3.5f)
+                                    localScaleMultiplier = ratio
+                                } else {
+                                    localDragOffset = Offset(
+                                        localDragOffset.x + dragAmount.x,
+                                        localDragOffset.y + dragAmount.y
+                                    )
+                                }
+                            } else if (selectedText != null) {
+                                val cx = selectedText.normalizedX * canvasW
+                                val cy = selectedText.normalizedY * canvasH
+
+                                if (activeCornerHandleIndex == 4) {
+                                    val currentTouch = change.position
+                                    val angleRad = kotlin.math.atan2(currentTouch.y - cy, currentTouch.x - cx)
+                                    var deg = Math.toDegrees(angleRad.toDouble()).toFloat() + 90f
+                                    if (deg < 0) deg += 360f
+                                    localRotationDeg = deg % 360f
+                                } else if (activeCornerHandleIndex in 0..3) {
+                                    val currentDist = sqrt((change.position.x - cx) * (change.position.x - cx) + (change.position.y - cy) * (change.position.y - cy))
+                                    val bounds = ProceduralM3Assembler.measureTextBounds(selectedText, baseDim, params.scale)
+                                    val initialDist = sqrt((bounds.width() / 2f) * (bounds.width() / 2f) + (bounds.height() / 2f) * (bounds.height() / 2f)).coerceAtLeast(1f)
+                                    val ratio = (currentDist / initialDist).coerceIn(0.25f, 3.5f)
+                                    localScaleMultiplier = ratio
+                                } else {
+                                    localDragOffset = Offset(
+                                        localDragOffset.x + dragAmount.x,
+                                        localDragOffset.y + dragAmount.y
+                                    )
+                                }
                             }
                         },
                         onDragEnd = {
-                            if (selectedShape != null) {
-                                val canvasW = size.width.toFloat()
-                                val canvasH = size.height.toFloat()
-                                val baseDim = minOf(canvasW, canvasH)
-                                val scaleFactor = params.scale * baseDim
+                            val canvasW = size.width.toFloat()
+                            val canvasH = size.height.toFloat()
+                            val baseDim = minOf(canvasW, canvasH)
+                            val scaleFactor = params.scale * baseDim
 
+                            if (selectedShape != null) {
                                 if (activeCornerHandleIndex == 4 && localRotationDeg != null) {
                                     onCommitShapeRotation(selectedShape.id, localRotationDeg!!)
                                 } else if (activeCornerHandleIndex in 0..3) {
@@ -316,7 +385,19 @@ fun StudioTouchCanvas(
                                     val newY = (selectedShape.normalizedY + (localDragOffset.y / canvasH)).coerceIn(0.05f, 0.95f)
                                     onCommitShapePosition(selectedShape.id, newX, newY)
                                 }
+                            } else if (selectedText != null) {
+                                if (activeCornerHandleIndex == 4 && localRotationDeg != null) {
+                                    onCommitTextRotation(selectedText.id, localRotationDeg!!)
+                                } else if (activeCornerHandleIndex in 0..3) {
+                                    val newSize = (selectedText.normalizedSize * localScaleMultiplier).coerceIn(0.06f, 0.45f)
+                                    onCommitTextScale(selectedText.id, newSize)
+                                } else if (activeCornerHandleIndex == -1 && localDragOffset != Offset.Zero) {
+                                    val newX = (selectedText.normalizedX + (localDragOffset.x / canvasW)).coerceIn(0.05f, 0.95f)
+                                    val newY = (selectedText.normalizedY + (localDragOffset.y / canvasH)).coerceIn(0.05f, 0.95f)
+                                    onCommitTextPosition(selectedText.id, newX, newY)
+                                }
                             }
+
                             localDragOffset = Offset.Zero
                             activeCornerHandleIndex = -1
                             localScaleMultiplier = 1f
@@ -332,75 +413,131 @@ fun StudioTouchCanvas(
                 }
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val sorted = params.customShapes.sortedBy { it.zIndex }
-                val colors = palette.colors
                 val baseDim = minOf(size.width, size.height)
+                val colors = palette.colors
 
-                for (shape in sorted) {
-                    val isSelected = shape.id == selectedShapeId
-                    val dragX = if (isSelected) localDragOffset.x else 0f
-                    val dragY = if (isSelected) localDragOffset.y else 0f
+                // Unified Render Items sorted by zIndex
+                sealed class CanvasItem(val z: Int) {
+                    class Shape(val shape: com.example.engine.CustomCanvasShape) : CanvasItem(shape.zIndex)
+                    class Text(val text: StudioTextLayer) : CanvasItem(text.zIndex)
+                }
 
-                    val cx = (shape.normalizedX * size.width) + dragX
-                    val cy = (shape.normalizedY * size.height) + dragY
-                    val scaleFactor = params.scale * baseDim
-                    val effectiveScale = if (isSelected && activeCornerHandleIndex in 0..3) localScaleMultiplier else 1f
-                    val effectiveRot = if (isSelected && activeCornerHandleIndex == 4 && localRotationDeg != null) {
-                        localRotationDeg!!
-                    } else {
-                        shape.rotationDeg + params.rotationDegrees
-                    }
+                val allItems = (params.customShapes.map { CanvasItem.Shape(it) } +
+                        params.customTexts.map { CanvasItem.Text(it) }).sortedBy { it.z }
 
-                    val w = shape.normalizedWidth * scaleFactor * effectiveScale
-                    val h = if (shape.type.isProportional1to1) {
-                        w
-                    } else {
-                        shape.normalizedHeight * scaleFactor * effectiveScale
-                    }
+                for (item in allItems) {
+                    when (item) {
+                        is CanvasItem.Shape -> {
+                            val shape = item.shape
+                            val isSelected = shape.id == selectedShapeId
+                            val dragX = if (isSelected) localDragOffset.x else 0f
+                            val dragY = if (isSelected) localDragOffset.y else 0f
 
-                    val shapeColor = if (shape.customColorHex != null) {
-                        Color(shape.customColorHex.toULong())
-                    } else {
-                        colors[shape.colorIndex % colors.size]
-                    }
+                            val cx = (shape.normalizedX * size.width) + dragX
+                            val cy = (shape.normalizedY * size.height) + dragY
+                            val scaleFactor = params.scale * baseDim
+                            val effectiveScale = if (isSelected && activeCornerHandleIndex in 0..3) localScaleMultiplier else 1f
+                            val effectiveRot = if (isSelected && activeCornerHandleIndex == 4 && localRotationDeg != null) {
+                                localRotationDeg!!
+                            } else {
+                                shape.rotationDeg + params.rotationDegrees
+                            }
 
-                    // Native Canvas drawing for performance and elevation shadow
-                    drawIntoCanvas { composeCanvas ->
-                        val nativeCanvas = composeCanvas.nativeCanvas
-                        ProceduralM3Assembler.drawSingleShape(
-                            canvas = nativeCanvas,
-                            type = shape.type,
-                            cx = cx,
-                            cy = cy,
-                            w = w,
-                            h = h,
-                            rotationDeg = effectiveRot,
-                            color = shapeColor.toArgb(),
-                            opacity = shape.opacity,
-                            isWireframe = shape.isWireframe || params.isWireframe,
-                            strokeWidth = shape.strokeWidth * (size.width / 500f),
-                            scallopLobes = shape.scallopLobes,
-                            castShadow = true,
-                            shadowRadius = shape.shadowRadius,
-                            blurRadius = shape.blurRadius,
-                            isLiquidGlass = shape.isLiquidGlass
-                        )
-                    }
+                            val w = shape.normalizedWidth * scaleFactor * effectiveScale
+                            val h = if (shape.type.isProportional1to1) {
+                                w
+                            } else {
+                                shape.normalizedHeight * scaleFactor * effectiveScale
+                            }
 
-                    // Draw direct corner transform handles and bounding box
-                    if (isSelected) {
-                        drawSelectionBoundingBoxWithCorners(
-                            cx = cx,
-                            cy = cy,
-                            w = w,
-                            h = h,
-                            rotationDeg = effectiveRot
-                        )
+                            val shapeColor = if (shape.customColorHex != null) {
+                                Color(shape.customColorHex.toULong())
+                            } else {
+                                colors[shape.colorIndex % colors.size]
+                            }
+
+                            drawIntoCanvas { composeCanvas ->
+                                val nativeCanvas = composeCanvas.nativeCanvas
+                                ProceduralM3Assembler.drawSingleShape(
+                                    canvas = nativeCanvas,
+                                    type = shape.type,
+                                    cx = cx,
+                                    cy = cy,
+                                    w = w,
+                                    h = h,
+                                    rotationDeg = effectiveRot,
+                                    color = shapeColor.hashCode(),
+                                    opacity = shape.opacity,
+                                    isWireframe = shape.isWireframe || params.isWireframe,
+                                    strokeWidth = shape.strokeWidth * (size.width / 500f),
+                                    scallopLobes = shape.scallopLobes,
+                                    castShadow = true,
+                                    shadowRadius = shape.shadowRadius,
+                                    blurRadius = shape.blurRadius,
+                                    isLiquidGlass = shape.isLiquidGlass
+                                )
+                            }
+
+                            if (isSelected) {
+                                drawSelectionBoundingBoxWithCorners(
+                                    cx = cx,
+                                    cy = cy,
+                                    w = w,
+                                    h = h,
+                                    rotationDeg = effectiveRot
+                                )
+                            }
+                        }
+                        is CanvasItem.Text -> {
+                            val textLayer = item.text
+                            val isSelected = textLayer.id == selectedTextId
+                            val dragX = if (isSelected) localDragOffset.x else 0f
+                            val dragY = if (isSelected) localDragOffset.y else 0f
+
+                            val cx = (textLayer.normalizedX * size.width) + dragX
+                            val cy = (textLayer.normalizedY * size.height) + dragY
+                            val effectiveScale = if (isSelected && activeCornerHandleIndex in 0..3) localScaleMultiplier else 1f
+                            val effectiveRot = if (isSelected && activeCornerHandleIndex == 4 && localRotationDeg != null) {
+                                localRotationDeg!!
+                            } else {
+                                textLayer.rotationDeg + params.rotationDegrees
+                            }
+                            val fontSizePx = textLayer.normalizedSize * baseDim * params.scale * effectiveScale
+
+                            val textColor = if (textLayer.customColorHex != null) {
+                                textLayer.customColorHex.toInt()
+                            } else {
+                                colors[textLayer.colorIndex % colors.size].hashCode()
+                            }
+
+                            drawIntoCanvas { composeCanvas ->
+                                ProceduralM3Assembler.drawSingleText(
+                                    canvas = composeCanvas.nativeCanvas,
+                                    textLayer = textLayer,
+                                    cx = cx,
+                                    cy = cy,
+                                    fontSizePx = fontSizePx,
+                                    color = textColor,
+                                    rotationDeg = effectiveRot
+                                )
+                            }
+
+                            if (isSelected) {
+                                val bounds = ProceduralM3Assembler.measureTextBounds(textLayer, baseDim, params.scale * effectiveScale)
+                                drawSelectionBoundingBoxWithCorners(
+                                    cx = cx,
+                                    cy = cy,
+                                    w = bounds.width(),
+                                    h = bounds.height(),
+                                    rotationDeg = effectiveRot
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            // Viewport-clamped floating toolbar with granular controls
+            // Viewport-clamped floating toolbar for Shape
             if (selectedShape != null && !isFullscreen) {
                 val canvasWidthPx = constraints.maxWidth.toFloat()
                 val canvasHeightPx = constraints.maxHeight.toFloat()
@@ -446,13 +583,46 @@ fun StudioTouchCanvas(
                     onDeselect = { onSelectShape(null) }
                 )
             }
+
+            // Viewport-clamped floating toolbar for Depth Text
+            if (selectedText != null && !isFullscreen) {
+                val canvasWidthPx = constraints.maxWidth.toFloat()
+                val canvasHeightPx = constraints.maxHeight.toFloat()
+                val baseDim = minOf(canvasWidthPx, canvasHeightPx)
+                val bounds = ProceduralM3Assembler.measureTextBounds(selectedText, baseDim, params.scale * localScaleMultiplier)
+                val cx = (selectedText.normalizedX * canvasWidthPx) + localDragOffset.x
+                val cy = (selectedText.normalizedY * canvasHeightPx) + localDragOffset.y
+
+                val textRect = Rect(
+                    left = cx - (bounds.width() / 2f),
+                    top = cy - (bounds.height() / 2f),
+                    right = cx + (bounds.width() / 2f),
+                    bottom = cy + (bounds.height() / 2f)
+                )
+
+                StudioTextToolbar(
+                    textLayer = selectedText,
+                    palette = palette,
+                    textBounds = textRect,
+                    canvasTopOffsetDp = 0.dp,
+                    containerHeightDp = with(density) { constraints.maxHeight.toDp() },
+                    onUpdateText = { str -> onUpdateTextContent(selectedText.id, str) },
+                    onColorSelected = { cIdx -> onSetTextColorIndex(selectedText.id, cIdx) },
+                    onRotate = { deg -> onCommitTextRotation(selectedText.id, deg) },
+                    onBringToFront = { onBringTextToFront(selectedText.id) },
+                    onSendToBack = { onSendTextToBack(selectedText.id) },
+                    onDelete = { onDeleteText(selectedText.id) },
+                    onUpdateOpacity = { op -> onUpdateTextOpacity(selectedText.id, op) },
+                    onUpdateShadowRadius = { sr -> onUpdateTextShadowRadius(selectedText.id, sr) },
+                    onDeselect = { onSelectTextLayer(null) }
+                )
+            }
         }
     }
 }
 
 /**
- * Draws the bounding box and 4 prominent corner pill/circle anchor nodes.
- * Reuses static paints to guarantee ZERO allocations in DrawScope passes.
+ * Draws the bounding box and 4 prominent corner anchor nodes plus rotation stem.
  */
 private fun DrawScope.drawSelectionBoundingBoxWithCorners(
     cx: Float,
@@ -471,19 +641,19 @@ private fun DrawScope.drawSelectionBoundingBoxWithCorners(
             native.rotate(rotationDeg, cx, cy)
         }
 
-        // 1. Dashed Bounding Outline (reused paint)
+        // 1. Dashed Bounding Outline
         selectionBoxPaint.strokeWidth = 2.dp.toPx()
         native.drawRoundRect(
             cx - halfW, cy - halfH, cx + halfW, cy + halfH,
             16.dp.toPx(), 16.dp.toPx(), selectionBoxPaint
         )
 
-        // Rotation stem line extending upward (reused paint)
+        // Rotation stem line extending upward
         val stemLength = 26.dp.toPx()
         selectionStemPaint.strokeWidth = 2.dp.toPx()
         native.drawLine(cx, cy - halfH, cx, cy - halfH - stemLength, selectionStemPaint)
 
-        // 2. 4 Distinct Corner Pill/Circle Transform Anchors + Rotation Handle
+        // 2. 4 Distinct Corner Anchor Nodes + Rotation Handle
         val cornerRadiusPx = 10.dp.toPx()
         val cornerDotRadiusPx = 4.dp.toPx()
 

@@ -16,6 +16,7 @@ import com.example.engine.AspectRatioPreset
 import com.example.engine.CustomCanvasShape
 import com.example.engine.CustomShapeType
 import com.example.engine.ProceduralRenderer
+import com.example.engine.StudioTextLayer
 import com.example.engine.WallpaperParams
 import com.example.engine.WallpaperPatternType
 import com.example.export.ExportResult
@@ -45,11 +46,13 @@ data class WallpaperUiState(
     val showStyleSheet: Boolean = false,
     val showPaletteSheet: Boolean = false,
     val showAddShapeSheet: Boolean = false,
+    val showAddTextSheet: Boolean = false,
     val showColorPickerModal: Boolean = false,
     val showCustomPaletteBuilder: Boolean = false,
     val userCustomPalettes: List<ColorPalette> = emptyList(),
     val activeColorStopIndex: Int = 0,
     val selectedShapeId: String? = null,
+    val selectedTextId: String? = null,
     val isExporting: Boolean = false,
     val isSettingsOpen: Boolean = false,
     val settings: AppSettingsState = AppSettingsState(),
@@ -325,11 +328,132 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun showAddShapeSheet(show: Boolean) {
-        _uiState.update { it.copy(showAddShapeSheet = show, showStyleSheet = false, showPaletteSheet = false) }
+        _uiState.update { it.copy(showAddShapeSheet = show, showAddTextSheet = false, showStyleSheet = false, showPaletteSheet = false) }
+    }
+
+    fun showAddTextSheet(show: Boolean) {
+        _uiState.update { it.copy(showAddTextSheet = show, showAddShapeSheet = false, showStyleSheet = false, showPaletteSheet = false) }
     }
 
     fun selectShape(id: String?) {
-        _uiState.update { it.copy(selectedShapeId = id) }
+        _uiState.update { it.copy(selectedShapeId = id, selectedTextId = if (id != null) null else it.selectedTextId) }
+    }
+
+    fun selectTextLayer(id: String?) {
+        _uiState.update { it.copy(selectedTextId = id, selectedShapeId = if (id != null) null else it.selectedShapeId) }
+    }
+
+    fun addTextLayer(text: String = "STUDIO") {
+        val currentTexts = _uiState.value.params.customTexts
+        val currentShapes = _uiState.value.params.customShapes
+        val colorsCount = _uiState.value.params.palette.colors.size.coerceAtLeast(1)
+        val maxZ = maxOf(
+            currentShapes.maxOfOrNull { it.zIndex } ?: 0,
+            currentTexts.maxOfOrNull { it.zIndex } ?: 0
+        ) + 1
+        val newText = StudioTextLayer(
+            id = UUID.randomUUID().toString(),
+            text = text,
+            normalizedX = 0.5f,
+            normalizedY = 0.5f,
+            normalizedSize = 0.16f,
+            colorIndex = 1 % colorsCount,
+            zIndex = maxZ
+        )
+        val updatedList = currentTexts + newText
+        updateParams { it.copy(customTexts = updatedList) }
+        _uiState.update { it.copy(selectedTextId = newText.id, selectedShapeId = null) }
+    }
+
+    fun updateTextLayerContent(id: String, newText: String) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(text = newText) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun updateTextPosition(id: String, normX: Float, normY: Float) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(normalizedX = normX, normalizedY = normY) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun updateTextScale(id: String, newSize: Float) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(normalizedSize = newSize.coerceIn(0.06f, 0.45f)) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun updateTextRotation(id: String, deg: Float) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(rotationDeg = deg % 360f) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun setTextColorIndex(id: String, colorIdx: Int) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(colorIndex = colorIdx, customColorHex = null) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun updateTextOpacity(id: String, opacity: Float) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(opacity = opacity.coerceIn(0.05f, 1.0f)) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun updateTextShadowRadius(id: String, shadowRadius: Float) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(shadowRadius = shadowRadius.coerceIn(0.0f, 40.0f)) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun bringTextToFront(id: String) {
+        val currentTexts = _uiState.value.params.customTexts
+        val currentShapes = _uiState.value.params.customShapes
+        val maxZ = maxOf(
+            currentShapes.maxOfOrNull { it.zIndex } ?: 0,
+            currentTexts.maxOfOrNull { it.zIndex } ?: 0
+        ) + 1
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(zIndex = maxZ) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun sendTextToBack(id: String) {
+        val currentTexts = _uiState.value.params.customTexts
+        val currentShapes = _uiState.value.params.customShapes
+        val minZ = minOf(
+            currentShapes.minOfOrNull { it.zIndex } ?: 0,
+            currentTexts.minOfOrNull { it.zIndex } ?: 0
+        ) - 1
+        val updated = currentTexts.map {
+            if (it.id == id) it.copy(zIndex = minZ) else it
+        }
+        updateParams { it.copy(customTexts = updated) }
+    }
+
+    fun deleteTextLayer(id: String) {
+        val currentTexts = _uiState.value.params.customTexts
+        val updated = currentTexts.filterNot { it.id == id }
+        updateParams { it.copy(customTexts = updated) }
+        if (_uiState.value.selectedTextId == id) {
+            _uiState.update { it.copy(selectedTextId = null) }
+        }
     }
 
     fun addCustomShape(type: CustomShapeType) {

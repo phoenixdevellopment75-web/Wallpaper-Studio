@@ -1,8 +1,10 @@
 package com.example.ui
 
+import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -13,21 +15,34 @@ import androidx.compose.ui.unit.dp
 object PersonalizationPreferences
 
 /**
- * Pass-through modifier ensuring zero ghosting or broken backdrop blur effects.
+ * Safe backdrop blur modifier that applies blur strictly on API 31+ (Android 12+)
+ * only when displayBlurEffectsEnabled is true and only to designated wallpaper canvas backdrops
+ * or modal scrims. Never applied to foreground text or card containers to prevent text corruption.
  */
 fun Modifier.studioBackdropBlur(
-    disableBlur: Boolean = true,
-    radius: Dp = 0.dp
-): Modifier = this
+    blurEnabled: Boolean = false,
+    radius: Dp = 16.dp
+): Modifier {
+    return if (blurEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && radius > 0.dp) {
+        this.blur(radius = radius)
+    } else {
+        this
+    }
+}
 
 /**
  * Resolves surface container color for Material 3 surfaces.
- * Returns crisp, elegant, fully opaque solid M3 surfaceContainer color.
+ * Returns crisp solid M3 surfaceContainer color or translucent tinted color when blur is active.
  */
 @Composable
 fun getBackdropSurfaceColor(
-    disableBlur: Boolean = true,
-    defaultAlphaWhenBlurred: Float = 1.0f
+    blurEnabled: Boolean = false,
+    defaultAlphaWhenBlurred: Float = 0.85f
 ): Color {
-    return MaterialTheme.colorScheme.surfaceContainer
+    val base = MaterialTheme.colorScheme.surfaceContainer
+    return if (blurEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        base.copy(alpha = defaultAlphaWhenBlurred)
+    } else {
+        base
+    }
 }

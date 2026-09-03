@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.proceduralwallpaper.pfjfwa"
     minSdk = 24
     targetSdk = 36
-    versionCode = 241
-    versionName = "2.4.1"
+    versionCode = 3
+    versionName = "2.4.20"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

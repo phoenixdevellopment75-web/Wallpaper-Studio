@@ -145,6 +145,7 @@ fun MainScreen(
     val isAnySheetOpen = uiState.showStyleSheet ||
         uiState.showPaletteSheet ||
         uiState.showAddShapeSheet ||
+        uiState.showAddTextSheet ||
         uiState.showExportDialog ||
         uiState.isSettingsOpen ||
         uiState.showColorPickerModal ||
@@ -172,7 +173,9 @@ fun MainScreen(
                 StudioCanvas(
                     params = uiState.params,
                     selectedShapeId = uiState.selectedShapeId,
+                    selectedTextId = uiState.selectedTextId,
                     onSelectShape = { id -> viewModel.selectShape(id) },
+                    onSelectTextLayer = { id -> viewModel.selectTextLayer(id) },
                     onCommitShapePosition = { id, x, y -> viewModel.commitShapePosition(id, x, y) },
                     onCommitShapeScale = { id, w -> viewModel.commitShapeScale(id, w) },
                     onCommitShapeRotation = { id, deg -> viewModel.commitShapeRotation(id, deg) },
@@ -186,6 +189,16 @@ fun MainScreen(
                     onUpdateOpacity = { id, op -> viewModel.updateShapeOpacity(id, op) },
                     onUpdateShadowRadius = { id, sr -> viewModel.updateShapeShadowRadius(id, sr) },
                     onUpdateBlurRadius = { id, br -> viewModel.updateShapeBlurRadius(id, br) },
+                    onUpdateTextContent = { id, text -> viewModel.updateTextLayerContent(id, text) },
+                    onCommitTextPosition = { id, x, y -> viewModel.updateTextPosition(id, x, y) },
+                    onCommitTextScale = { id, size -> viewModel.updateTextScale(id, size) },
+                    onCommitTextRotation = { id, deg -> viewModel.updateTextRotation(id, deg) },
+                    onSetTextColorIndex = { id, idx -> viewModel.setTextColorIndex(id, idx) },
+                    onBringTextToFront = { id -> viewModel.bringTextToFront(id) },
+                    onSendTextToBack = { id -> viewModel.sendTextToBack(id) },
+                    onDeleteText = { id -> viewModel.deleteTextLayer(id) },
+                    onUpdateTextOpacity = { id, op -> viewModel.updateTextOpacity(id, op) },
+                    onUpdateTextShadowRadius = { id, sr -> viewModel.updateTextShadowRadius(id, sr) },
                     isFullscreen = uiState.isFullscreenPreview,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -283,6 +296,12 @@ fun MainScreen(
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
                                 viewModel.showAddShapeSheet(true)
+                            },
+                            onOpenAddTextSheet = {
+                                if (uiState.settings.hapticStrength != HapticStrength.OFF) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                viewModel.showAddTextSheet(true)
                             },
                             onGenerateLayout = {
                                 if (uiState.settings.hapticStrength != HapticStrength.OFF) {
@@ -497,6 +516,16 @@ fun MainScreen(
         AddShapeBottomSheet(
             onShapeChosen = { type -> viewModel.addCustomShape(type) },
             onDismiss = { viewModel.showAddShapeSheet(false) }
+        )
+    }
+
+    // -------------------------------------------------------------
+    // ADD DEPTH TEXT MODAL SHEET (Studio Nagasaki Display)
+    // -------------------------------------------------------------
+    if (uiState.showAddTextSheet) {
+        AddTextBottomSheet(
+            onAddText = { text -> viewModel.addTextLayer(text) },
+            onDismiss = { viewModel.showAddTextSheet(false) }
         )
     }
 
